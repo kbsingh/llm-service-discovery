@@ -1,0 +1,68 @@
+; BIND Zone File - Development Environment
+; dev.corp.example.com - LLM Discovery for Development/Testing
+;
+; Development endpoints: local, mock, and low-cost testing services
+
+$TTL 60  ; Short TTL for rapid iteration
+@       IN      SOA     ns1.corp.example.com. admin.corp.example.com. (
+                        2026101201      ; Serial (YYYYMMDDNN)
+                        600             ; Refresh (10 min)
+                        300             ; Retry (5 min)
+                        86400           ; Expire (1 day)
+                        60 )            ; Negative Cache TTL (1 min)
+
+; Name servers
+@       IN      NS      ns1.corp.example.com.
+
+; =============================================================================
+; DEVELOPMENT CHAT ENDPOINTS
+; Local/mock services for development without API costs
+; =============================================================================
+
+; Primary: Local mock server for fast iteration
+_llm-chat._tcp  IN  SRV  10  70  3000  localhost.
+
+; Secondary: Cheap cloud model for realistic testing
+_llm-chat._tcp  IN  SRV  10  30  443   dev-provider1
+
+; Emergency fallback
+_llm-chat._tcp  IN  SRV  20  100  8080  shared-dev-llm.internal
+
+_llm-chat._tcp  IN  TXT  "path=/v1/messages"
+_llm-chat._tcp  IN  TXT  "environment=development"
+_llm-chat._tcp  IN  TXT  "provider=mock"
+_llm-chat._tcp  IN  TXT  "cost=free"
+_llm-chat._tcp  IN  TXT  "latency=low"
+
+; =============================================================================
+; DEVELOPMENT EMBEDDING ENDPOINTS
+; =============================================================================
+
+_llm-embedding._tcp  IN  SRV  10  100  3001  localhost.
+
+_llm-embedding._tcp  IN  TXT  "path=/v1/embeddings"
+_llm-embedding._tcp  IN  TXT  "provider=mock"
+_llm-embedding._tcp  IN  TXT  "dimensions=384"
+
+; =============================================================================
+; DEVELOPMENT VISION ENDPOINTS
+; =============================================================================
+
+_llm-vision._tcp  IN  SRV  10  100  3002  localhost.
+
+_llm-vision._tcp  IN  TXT  "provider=mock"
+_llm-vision._tcp  IN  TXT  "note=returns-dummy-responses"
+
+; =============================================================================
+; LOCALHOST VARIATIONS FOR DIFFERENT PORTS
+; =============================================================================
+
+localhost  IN  A  127.0.0.1
+localhost  IN  AAAA  ::1
+
+; =============================================================================
+; SHARED DEV RESOURCES
+; =============================================================================
+
+shared-dev-llm.internal      IN  A  10.200.0.100
+dev-provider1                IN  A  10.200.0.200

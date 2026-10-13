@@ -1,0 +1,117 @@
+; BIND Zone File - Finance Department View
+; corp.example.com - LLM Discovery for Finance Network (10.1.0.0/16)
+;
+; Finance dept gets ONLY compliant endpoints (SOC2, HIPAA, GDPR)
+; No experimental models, no public cloud for PII workloads
+
+$TTL 300
+@       IN      SOA     ns1.corp.example.com. admin.corp.example.com. (
+                        2026101201      ; Serial (YYYYMMDDNN)
+                        3600            ; Refresh
+                        1800            ; Retry
+                        604800          ; Expire
+                        300 )           ; Negative Cache TTL
+
+; Name servers
+@       IN      NS      ns1.corp.example.com.
+@       IN      NS      ns2.corp.example.com.
+
+ns1     IN      A       10.0.1.10
+ns2     IN      A       10.0.1.11
+
+; =============================================================================
+; CHAT COMPLETION ENDPOINTS
+; Finance: ONLY secure, audited, on-premises endpoints
+; =============================================================================
+
+; Primary: SOC2-compliant on-prem cluster with audit logging
+_llm-chat._tcp  IN  SRV  10  100  8443  llm-secure.internal.corp.example.com.
+
+; NO cloud backup - all PII stays on-premises per policy
+
+; Metadata emphasizes compliance
+_llm-chat._tcp  IN  TXT  "path=/v1/messages"
+_llm-chat._tcp  IN  TXT  "provider=on-premises"
+_llm-chat._tcp  IN  TXT  "protocol=openai-compatible"
+_llm-chat._tcp  IN  TXT  "auth=required"
+_llm-chat._tcp  IN  TXT  "scheme=https"
+_llm-chat._tcp  IN  TXT  "compliance=soc2,hipaa,gdpr"
+_llm-chat._tcp  IN  TXT  "data-residency=on-premises"
+_llm-chat._tcp  IN  TXT  "audit-logging=enabled"
+_llm-chat._tcp  IN  TXT  "encryption=tls-1.3-only"
+_llm-chat._tcp  IN  TXT  "retention-policy=90-days"
+
+; =============================================================================
+; EMBEDDING ENDPOINTS
+; Finance: Compliant embedding service only
+; =============================================================================
+
+_llm-embedding._tcp  IN  SRV  10  100  8443  embeddings-secure.internal.corp.example.com.
+
+_llm-embedding._tcp  IN  TXT  "path=/v1/embeddings"
+_llm-embedding._tcp  IN  TXT  "provider=on-premises"
+_llm-embedding._tcp  IN  TXT  "scheme=https"
+_llm-embedding._tcp  IN  TXT  "compliance=soc2,hipaa"
+_llm-embedding._tcp  IN  TXT  "data-residency=on-premises"
+
+; =============================================================================
+; VISION (MULTIMODAL) ENDPOINTS
+; Finance: RESTRICTED - No vision models approved for PII
+; Queries return no results (NXDOMAIN handled by absence)
+; =============================================================================
+
+; NOTE: Intentionally no _llm-vision._tcp records
+; Finance dept policy: No image uploads containing potential PII
+
+; =============================================================================
+; CODE-SPECIALIZED ENDPOINTS
+; Finance: Limited to on-prem only (source code is sensitive)
+; =============================================================================
+
+_llm-code._tcp  IN  SRV  10  100  8443  llm-secure.internal.corp.example.com.
+
+_llm-code._tcp  IN  TXT  "provider=on-premises"
+_llm-code._tcp  IN  TXT  "compliance=soc2"
+_llm-code._tcp  IN  TXT  "use-case=code-review-only"
+
+; =============================================================================
+; IMAGE GENERATION - RESTRICTED
+; Finance policy: No generative image models approved
+; =============================================================================
+
+; NOTE: Intentionally no _llm-image-gen._tcp records
+
+; =============================================================================
+; POLICY-BASED SUBDOMAINS
+; =============================================================================
+
+; Fast tier: Not available (finance requires certified models only)
+; Smart tier: Maps to same secure endpoint
+_llm-chat._tcp.smart  IN  SRV  10  100  8443  llm-secure.internal.corp.example.com.
+_llm-chat._tcp.smart  IN  TXT  "model=claude-opus-5-compliant"
+_llm-chat._tcp.smart  IN  TXT  "tier=premium-compliant"
+_llm-chat._tcp.smart  IN  TXT  "scheme=https"
+
+; PII tier: Primary use case for finance
+_llm-chat._tcp.pii  IN  SRV  10  100  8443  llm-secure.internal.corp.example.com.
+_llm-chat._tcp.pii  IN  TXT  "scheme=https"
+_llm-chat._tcp.pii  IN  TXT  "compliance=soc2,hipaa,gdpr"
+_llm-chat._tcp.pii  IN  TXT  "pii-handling=approved"
+_llm-chat._tcp.pii  IN  TXT  "data-classification=confidential"
+
+; =============================================================================
+; ACTUAL ENDPOINT A RECORDS
+; =============================================================================
+
+llm-secure.internal          IN  A  10.1.10.100
+embeddings-secure.internal   IN  A  10.1.10.101
+
+; =============================================================================
+; COMPLIANCE DOCUMENTATION POINTERS
+; =============================================================================
+
+; TXT records pointing to compliance docs
+_compliance._tcp  IN  TXT  "soc2-report=https://compliance.corp.example.com/soc2"
+_compliance._tcp  IN  TXT  "hipaa-baa=https://compliance.corp.example.com/hipaa-baa"
+_compliance._tcp  IN  TXT  "gdpr-dpa=https://compliance.corp.example.com/gdpr"
+_compliance._tcp  IN  TXT  "acceptable-use=https://policy.corp.example.com/llm-aup"

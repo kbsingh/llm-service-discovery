@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Rust
+target/
+examples/clients/rust/Cargo.lock
+
+# Go
+examples/clients/go/llm-discovery
+examples/clients/go/llm-discovery-example
+
+# Local scratch space (verification logs, temp scripts)
+.tmp/
+*.swp
+*~

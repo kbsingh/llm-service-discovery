@@ -1,0 +1,526 @@
+#!/usr/bin/env bash
+# llm-discovery - Query and report LLM endpoints via DNS SRV records
+# Usage: ./llm-discovery [OPTIONS]
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# Default values
+DOMAIN="${LLM_DISCOVERY_DOMAIN:-}"  # Empty = use system search domains
+DNS_SERVER="${LLM_DISCOVERY_DNS_SERVER:-}"
+DNS_PORT="${LLM_DISCOVERY_DNS_PORT:-53}"
+CAPABILITY="chat"
+SUBDOMAIN=""
+SHOW_ALL=false
+SHOW_METADATA=true
+SHOW_HEALTH=false
+VERBOSE=false
+OUTPUT_FORMAT="pretty"
+METADATA_JSON="{}"
+URL_SCHEME=""
+
+# Help message
+usage() {
+    cat << EOF
+${BOLD}llm-discovery${NC} - Query LLM endpoints via DNS SRV records
+
+${BOLD}USAGE:${NC}
+    $0 [OPTIONS]
+
+${BOLD}OPTIONS:${NC}
+    -d, --domain DOMAIN         DNS domain (default: use system search domains)
+    -s, --dns-server SERVER     Custom DNS server (default: system resolver)
+    -p, --dns-port PORT         DNS server port (default: 53)
+    -c, --capability TYPE       Capability: chat, embedding, vision, code, audio,
+                                image-gen, rerank (default: chat)
+    -u, --subdomain SUB         Policy subdomain (e.g., fast, smart, pii)
+    -a, --all                   Show all endpoints (not just selected one)
+    -m, --no-metadata           Don't query TXT metadata records
+    -H, --health                Check endpoint health
+    -f, --format FORMAT         Output format: pretty, json, csv (default: pretty)
+    -v, --verbose               Verbose output
+    -h, --help                  Show this help message
+
+${BOLD}ENVIRONMENT VARIABLES:${NC}
+    LLM_DISCOVERY_DOMAIN        Default domain (overrides system search domains)
+    LLM_DISCOVERY_DNS_SERVER    Default DNS server
+    LLM_DISCOVERY_DNS_PORT      Default DNS port
+
+${BOLD}SYSTEM DNS CONFIGURATION:${NC}
+    If no --domain is specified, uses search domains from /etc/resolv.conf
+
+    Example /etc/resolv.conf:
+        search corp.example.com
+        nameserver 10.0.1.10
+
+    Then: $0  queries _llm-chat._tcp.corp.example.com automatically
+
+${BOLD}EXAMPLES:${NC}
+    # Query chat endpoints (uses system search domains from /etc/resolv.conf)
+    $0
+
+    # Query with specific domain
+    $0 --domain corp.example.com
+
+    # Query embedding endpoints
+    $0 --capability embedding
+
+    # Use custom DNS server (e.g., local dnsmasq)
+    $0 --dns-server 127.0.0.1 --dns-port 5353
+
+    # Use fast tier subdomain
+    $0 --subdomain fast
+
+    # Show all available endpoints
+    $0 --all
+
+    # Check health and output JSON
+    $0 --health --format json
+
+${BOLD}CAPABILITIES:${NC}
+    chat        - Chat completion endpoints
+    embedding   - Text embedding endpoints
+    vision      - Vision/multimodal endpoints
+    code        - Code-specialized endpoints
+    audio       - Speech/transcription endpoints
+    image-gen   - Image generation endpoints
+    rerank      - Reranking endpoints
+
+${BOLD}POLICY SUBDOMAINS:${NC}
+    fast        - Fast/cheap models
+    smart       - High-capability models
+    pii         - PII-compliant endpoints
+    experimental - Beta/experimental models
+
+EOF
+    exit 0
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -d|--domain)
+            DOMAIN="$2"
+            shift 2
+            ;;
+        -s|--dns-server)
+            DNS_SERVER="$2"
+            shift 2
+            ;;
+        -p|--dns-port)
+            DNS_PORT="$2"
+            shift 2
+            ;;
+        -c|--capability)
+            CAPABILITY="$2"
+            shift 2
+            ;;
+        -u|--subdomain)
+            SUBDOMAIN="$2"
+            shift 2
+            ;;
+        -a|--all)
+            SHOW_ALL=true
+            shift
+            ;;
+        -m|--no-metadata)
+            SHOW_METADATA=false
+            shift
+            ;;
+        -H|--health)
+            SHOW_HEALTH=true
+            shift
+            ;;
+        -f|--format)
+            OUTPUT_FORMAT="$2"
+            shift 2
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown option: $1${NC}" >&2
+            echo "Use --help for usage information" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Check for required commands
+check_dependencies() {
+    local missing=()
+
+    for cmd in dig jq; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${RED}Error: Missing required commands: ${missing[*]}${NC}" >&2
+        echo "" >&2
+        echo "Install with:" >&2
+        echo "  Ubuntu/Debian: sudo apt-get install dnsutils jq" >&2
+        echo "  RHEL/CentOS:   sudo dnf install bind-utils jq" >&2
+        echo "  macOS:         brew install bind jq" >&2
+        exit 1
+    fi
+}
+
+# Query SRV records
+query_srv() {
+    local service=$1
+    local dns_args=()
+
+    if [[ -n "$DNS_SERVER" ]]; then
+        dns_args+=("@${DNS_SERVER}")
+    fi
+
+    if [[ "$DNS_PORT" != "53" ]]; then
+        dns_args+=("-p" "$DNS_PORT")
+    fi
+
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${CYAN}[DEBUG] Querying: ${service}${NC}" >&2
+        echo -e "${CYAN}[DEBUG] dig ${dns_args[*]} SRV ${service}${NC}" >&2
+    fi
+
+    dig "${dns_args[@]}" SRV "$service" +short
+}
+
+# Query TXT records
+query_txt() {
+    local service=$1
+    local dns_args=()
+
+    if [[ -n "$DNS_SERVER" ]]; then
+        dns_args+=("@${DNS_SERVER}")
+    fi
+
+    if [[ "$DNS_PORT" != "53" ]]; then
+        dns_args+=("-p" "$DNS_PORT")
+    fi
+
+    dig "${dns_args[@]}" TXT "$service" +short | tr -d '"'
+}
+
+# Parse SRV record
+parse_srv() {
+    local srv_record=$1
+    local priority=$(echo "$srv_record" | awk '{print $1}')
+    local weight=$(echo "$srv_record" | awk '{print $2}')
+    local port=$(echo "$srv_record" | awk '{print $3}')
+    local target=$(echo "$srv_record" | awk '{print $4}' | sed 's/\.$//')
+
+    echo "$priority|$weight|$port|$target"
+}
+
+# Construct URL
+# Scheme precedence: TXT "scheme" metadata (captured in $URL_SCHEME),
+# then the port-443 heuristic (SPECIFICATION.md).
+construct_url() {
+    local host=$1
+    local port=$2
+    local protocol="http"
+
+    if [[ -n "$URL_SCHEME" ]]; then
+        protocol="$URL_SCHEME"
+    elif [[ "$port" == "443" ]]; then
+        protocol="https"
+    fi
+
+    if [[ "$protocol" == "https" && "$port" == "443" ]] || \
+       [[ "$protocol" == "http" && "$port" == "80" ]]; then
+        echo "${protocol}://${host}"
+    else
+        echo "${protocol}://${host}:${port}"
+    fi
+}
+
+# Check endpoint health
+check_health() {
+    local url=$1
+    local health_paths=("/health" "/healthz" "/ping")
+
+    for path in "${health_paths[@]}"; do
+        if curl -sf --max-time 2 "${url}${path}" &> /dev/null; then
+            echo "healthy"
+            return 0
+        fi
+    done
+
+    # Try base URL
+    if curl -sf --max-time 2 "$url" &> /dev/null; then
+        echo "reachable"
+        return 0
+    fi
+
+    echo "down"
+    # Always return success: the status is communicated via stdout, and a
+    # non-zero exit would abort the caller under `set -e` (finding H-4:
+    # `--health --format json|csv` used to die with no output whenever any
+    # endpoint was down).
+    return 0
+}
+
+# Format output
+format_output() {
+    local format=$1
+    shift
+    local -a endpoints=("$@")
+
+    case "$format" in
+        json)
+            format_json "${endpoints[@]}"
+            ;;
+        csv)
+            format_csv "${endpoints[@]}"
+            ;;
+        *)
+            format_pretty "${endpoints[@]}"
+            ;;
+    esac
+}
+
+# Pretty output
+format_pretty() {
+    local -a endpoints=("$@")
+
+    if [[ ${#endpoints[@]} -eq 0 ]]; then
+        echo -e "${RED}❌ No endpoints found${NC}"
+        return 1
+    fi
+
+    echo -e "${BOLD}🔍 LLM Discovery Results${NC}"
+    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${BOLD}Capability:${NC} ${CAPABILITY}"
+    if [[ -n "$SUBDOMAIN" ]]; then
+        echo -e "  ${BOLD}Subdomain:${NC}  ${SUBDOMAIN}"
+    fi
+    if [[ -n "$DOMAIN" ]]; then
+        echo -e "  ${BOLD}Domain:${NC}     ${DOMAIN}"
+    else
+        echo -e "  ${BOLD}Domain:${NC}     ${YELLOW}(using system search domains)${NC}"
+    fi
+    echo ""
+
+    local count=1
+    for endpoint in "${endpoints[@]}"; do
+        IFS='|' read -r priority weight port target <<< "$endpoint"
+
+        local url=$(construct_url "$target" "$port")
+
+        echo -e "${BOLD}${count}. ${target}${NC}"
+        echo -e "   ${CYAN}URL:${NC}      ${url}"
+        echo -e "   ${CYAN}Port:${NC}     ${port}"
+        echo -e "   ${CYAN}Priority:${NC} ${priority} ${YELLOW}(lower = preferred)${NC}"
+        echo -e "   ${CYAN}Weight:${NC}   ${weight} ${YELLOW}(higher = more likely)${NC}"
+
+        if [[ "$SHOW_HEALTH" == "true" ]]; then
+            local health_status=$(check_health "$url")
+            local health_color=$RED
+            local health_symbol="❌"
+
+            if [[ "$health_status" == "healthy" ]]; then
+                health_color=$GREEN
+                health_symbol="✅"
+            elif [[ "$health_status" == "reachable" ]]; then
+                health_color=$YELLOW
+                health_symbol="⚠️ "
+            fi
+
+            echo -e "   ${CYAN}Health:${NC}   ${health_color}${health_symbol} ${health_status}${NC}"
+        fi
+
+        echo ""
+        ((count++))
+    done
+}
+
+# JSON output
+# Objects are built with jq --arg/--argjson so DNS-derived values cannot
+# break the JSON structure (finding M-7: the previous string
+# interpolation produced malformed JSON if a target contained quotes).
+format_json() {
+    local -a endpoints=("$@")
+    local -a json_parts=()
+
+    for endpoint in "${endpoints[@]}"; do
+        IFS='|' read -r priority weight port target <<< "$endpoint"
+
+        local url
+        url=$(construct_url "$target" "$port")
+        local health="unknown"
+
+        if [[ "$SHOW_HEALTH" == "true" ]]; then
+            health=$(check_health "$url")
+        fi
+
+        json_parts+=("$(jq -cn \
+            --arg target "$target" \
+            --argjson port "$port" \
+            --argjson priority "$priority" \
+            --argjson weight "$weight" \
+            --arg url "$url" \
+            --arg health "$health" \
+            --argjson metadata "$METADATA_JSON" \
+            '{target: $target, port: $port, priority: $priority, weight: $weight, url: $url, health: $health, metadata: $metadata}')")
+    done
+
+    if [[ ${#json_parts[@]} -eq 0 ]]; then
+        echo "[]"
+        return 0
+    fi
+
+    printf '%s\n' "${json_parts[@]}" | jq -s '.'
+}
+
+# Escape a CSV field (RFC 4180): wrap in quotes, double embedded quotes
+csv_field() {
+    local value=$1
+    value=${value//\"/\"\"}
+    printf '"%s"' "$value"
+}
+
+# CSV output
+format_csv() {
+    local -a endpoints=("$@")
+
+    echo "target,port,priority,weight,url,health"
+
+    for endpoint in "${endpoints[@]}"; do
+        IFS='|' read -r priority weight port target <<< "$endpoint"
+
+        local url
+        url=$(construct_url "$target" "$port")
+        local health="unknown"
+
+        if [[ "$SHOW_HEALTH" == "true" ]]; then
+            health=$(check_health "$url")
+        fi
+
+        echo "$(csv_field "$target"),${port},${priority},${weight},$(csv_field "$url"),$(csv_field "$health")"
+    done
+}
+
+# Main function
+main() {
+    check_dependencies
+
+    # Construct service name
+    local service="_llm-${CAPABILITY}._tcp"
+    if [[ -n "$SUBDOMAIN" ]]; then
+        service="${service}.${SUBDOMAIN}"
+    fi
+
+    # Add domain if specified, otherwise let resolver use search domains
+    if [[ -n "$DOMAIN" ]]; then
+        service="${service}.${DOMAIN}"
+    fi
+
+    if [[ "$VERBOSE" == "true" ]]; then
+        if [[ -n "$DOMAIN" ]]; then
+            echo -e "${CYAN}[INFO] Discovering: ${service}${NC}" >&2
+        else
+            echo -e "${CYAN}[INFO] Discovering: ${service} (using system search domains)${NC}" >&2
+        fi
+    fi
+
+    # Query SRV records
+    local srv_results
+    srv_results=$(query_srv "$service")
+
+    if [[ -z "$srv_results" ]]; then
+        echo -e "${RED}❌ No SRV records found for ${service}${NC}" >&2
+        exit 1
+    fi
+
+    # Parse endpoints
+    # Validate the record shape before use so that malformed or hostile
+    # DNS data can never reach jq --argjson or the output formatters.
+    local -a endpoints=()
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            if [[ "$line" =~ ^[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[^[:space:]]+ ]]; then
+                parsed=$(parse_srv "$line")
+                endpoints+=("$parsed")
+            elif [[ "$VERBOSE" == "true" ]]; then
+                echo -e "${YELLOW}[WARN] Skipping malformed SRV record: ${line}${NC}" >&2
+            fi
+        fi
+    done <<< "$srv_results"
+
+    # Sort by priority (ascending), then weight (descending)
+    IFS=$'\n' endpoints=($(sort -t'|' -k1,1n -k2,2rn <<< "${endpoints[*]}"))
+    unset IFS
+
+    # Collect metadata (TXT records): displayed in pretty mode and included
+    # as an object in JSON output (finding M-7 - previously JSON/CSV modes
+    # dropped the metadata entirely).
+    METADATA_JSON="{}"
+    if [[ "$SHOW_METADATA" == "true" && ( "$OUTPUT_FORMAT" == "pretty" || "$OUTPUT_FORMAT" == "json" ) ]]; then
+        local txt_results
+        txt_results=$(query_txt "$service")
+
+        if [[ -n "$txt_results" ]]; then
+            if [[ "$OUTPUT_FORMAT" == "pretty" ]]; then
+                echo -e "${BOLD}📋 Metadata:${NC}"
+            fi
+
+            local txt_line txt_key txt_value
+            while IFS= read -r txt_line; do
+                [[ -z "$txt_line" ]] && continue
+
+                if [[ "$txt_line" == *=* ]]; then
+                    txt_key="${txt_line%%=*}"
+                    txt_value="${txt_line#*=}"
+                else
+                    txt_key="$txt_line"
+                    txt_value="true"
+                fi
+
+                METADATA_JSON=$(jq -c --arg k "$txt_key" --arg v "$txt_value" \
+                    '. + {($k): $v}' <<< "$METADATA_JSON")
+
+                if [[ "$OUTPUT_FORMAT" == "pretty" ]]; then
+                    echo -e "   ${txt_line}"
+                fi
+            done <<< "$txt_results"
+
+            if [[ "$OUTPUT_FORMAT" == "pretty" ]]; then
+                echo ""
+            fi
+        fi
+
+        # Capture the advertised URL scheme (if any) for construct_url
+        URL_SCHEME=$(jq -r '.scheme // empty' <<< "$METADATA_JSON")
+    fi
+
+    # Output results
+    format_output "$OUTPUT_FORMAT" "${endpoints[@]}"
+
+    # Selection summary
+    if [[ "$OUTPUT_FORMAT" == "pretty" && "$SHOW_ALL" == "false" ]]; then
+        local selected="${endpoints[0]}"
+        IFS='|' read -r priority weight port target <<< "$selected"
+
+        echo -e "${GREEN}✅ Selected endpoint: ${BOLD}${target}:${port}${NC}"
+        echo -e "   ${YELLOW}(Priority ${priority}, Weight ${weight})${NC}"
+    fi
+}
+
+# Run main function
+main

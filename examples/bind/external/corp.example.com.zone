@@ -1,0 +1,97 @@
+; BIND Zone File - External View
+; corp.example.com - LLM Discovery for External/Internet Clients
+;
+; External clients get ONLY cloud provider endpoints (no internal IPs exposed)
+
+$TTL 3600
+@       IN      SOA     ns1.corp.example.com. admin.corp.example.com. (
+                        2026101201      ; Serial (YYYYMMDDNN)
+                        3600            ; Refresh
+                        1800            ; Retry
+                        604800          ; Expire
+                        3600 )          ; Negative Cache TTL (longer for stability)
+
+; Name servers (public)
+@       IN      NS      ns1.corp.example.com.
+@       IN      NS      ns2.corp.example.com.
+
+ns1     IN      A       203.0.113.10    ; Example public IP
+ns2     IN      A       203.0.113.11
+
+; =============================================================================
+; CHAT COMPLETION ENDPOINTS
+; External network: Cloud providers only, load balanced
+; =============================================================================
+
+; Equal weight between provider1 and OpenAI
+_llm-chat._tcp  IN  SRV  10  50  443  api-gateway-us.corp.example.com.
+_llm-chat._tcp  IN  SRV  10  50  443  api-gateway-eu.corp.example.com.
+
+; Metadata
+_llm-chat._tcp  IN  TXT  "path=/v1/chat"
+_llm-chat._tcp  IN  TXT  "provider=cloud"
+_llm-chat._tcp  IN  TXT  "protocol=openai-compatible"
+_llm-chat._tcp  IN  TXT  "auth=required"
+_llm-chat._tcp  IN  TXT  "environment=production"
+_llm-chat._tcp  IN  TXT  "regions=us,eu"
+
+; =============================================================================
+; EMBEDDING ENDPOINTS
+; =============================================================================
+
+_llm-embedding._tcp  IN  SRV  10  100  443  api-gateway-us.corp.example.com.
+
+_llm-embedding._tcp  IN  TXT  "path=/v1/embeddings"
+_llm-embedding._tcp  IN  TXT  "provider=openai"
+_llm-embedding._tcp  IN  TXT  "model=text-embedding-3-large"
+
+; =============================================================================
+; VISION (MULTIMODAL) ENDPOINTS
+; =============================================================================
+
+_llm-vision._tcp  IN  SRV  10  50  443  api-gateway-us.corp.example.com.
+_llm-vision._tcp  IN  SRV  10  50  443  api-gateway-eu.corp.example.com.
+
+_llm-vision._tcp  IN  TXT  "path=/v1/messages"
+_llm-vision._tcp  IN  TXT  "provider=provider1"
+_llm-vision._tcp  IN  TXT  "model=claude-3.5-sonnet"
+
+; =============================================================================
+; CODE-SPECIALIZED ENDPOINTS
+; =============================================================================
+
+_llm-code._tcp  IN  SRV  10  100  443  api-gateway-us.corp.example.com.
+
+_llm-code._tcp  IN  TXT  "provider=provider1"
+_llm-code._tcp  IN  TXT  "model=claude-opus-5"
+
+; =============================================================================
+; IMAGE GENERATION
+; =============================================================================
+
+_llm-image-gen._tcp  IN  SRV  10  100  443  api-gateway-us.corp.example.com.
+
+_llm-image-gen._tcp  IN  TXT  "path=/v1/images/generations"
+_llm-image-gen._tcp  IN  TXT  "provider=openai"
+
+; =============================================================================
+; POLICY-BASED SUBDOMAINS
+; Note: External clients don't get "fast" tier (internal-only cost optimization)
+; Note: External clients don't get "pii" tier (internal-only compliance)
+; =============================================================================
+
+; High-capability for complex reasoning (public tier)
+_llm-chat._tcp.smart  IN  SRV  10  100  443  api-gateway-us.corp.example.com.
+_llm-chat._tcp.smart  IN  TXT  "model=claude-opus-5"
+_llm-chat._tcp.smart  IN  TXT  "tier=premium"
+
+; =============================================================================
+; ACTUAL ENDPOINT A RECORDS (Public IPs)
+; =============================================================================
+
+api-gateway-us  IN  A  203.0.113.100
+api-gateway-eu  IN  A  198.51.100.100
+
+; Optional: AAAA records for IPv6
+api-gateway-us  IN  AAAA  2001:db8:100::1
+api-gateway-eu  IN  AAAA  2001:db8:200::1

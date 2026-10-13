@@ -1,0 +1,173 @@
+; BIND Zone File - Engineering Department View
+; corp.example.com - LLM Discovery for Engineering Network (10.2.0.0/16)
+;
+; Engineering gets full access: local models, cloud providers, AND experimental/beta
+
+$TTL 300
+@       IN      SOA     ns1.corp.example.com. admin.corp.example.com. (
+                        2026101201      ; Serial (YYYYMMDDNN)
+                        3600            ; Refresh
+                        1800            ; Retry
+                        604800          ; Expire
+                        300 )           ; Negative Cache TTL
+
+; Name servers
+@       IN      NS      ns1.corp.example.com.
+@       IN      NS      ns2.corp.example.com.
+
+ns1     IN      A       10.0.1.10
+ns2     IN      A       10.0.1.11
+
+; =============================================================================
+; CHAT COMPLETION ENDPOINTS
+; Engineering: All options including experimental models
+; =============================================================================
+
+; Primary: Local GPU cluster
+_llm-chat._tcp  IN  SRV  10  40  8080  llm-gpu-cluster.internal.corp.example.com.
+
+; Experimental/beta models (higher weight for engineering)
+_llm-chat._tcp  IN  SRV  10  30  8090  llm-experimental.internal.corp.example.com.
+
+; Cloud providers
+_llm-chat._tcp  IN  SRV  10  15  443   provider1-proxy.corp.example.com.
+_llm-chat._tcp  IN  SRV  10  15  443   openai-proxy.corp.example.com.
+
+; CPU fallback
+_llm-chat._tcp  IN  SRV  20  100  8080  llm-cpu-fallback.internal.corp.example.com.
+
+; Metadata
+_llm-chat._tcp  IN  TXT  "path=/v1/messages"
+_llm-chat._tcp  IN  TXT  "provider=mixed"
+_llm-chat._tcp  IN  TXT  "protocol=openai-compatible"
+_llm-chat._tcp  IN  TXT  "auth=required"
+_llm-chat._tcp  IN  TXT  "environment=engineering"
+_llm-chat._tcp  IN  TXT  "experimental-access=enabled"
+
+; =============================================================================
+; EMBEDDING ENDPOINTS
+; Engineering: Local + multiple cloud providers for testing
+; =============================================================================
+
+_llm-embedding._tcp  IN  SRV  10  50  8081  embeddings.internal.corp.example.com.
+_llm-embedding._tcp  IN  SRV  10  30  443   openai-proxy.corp.example.com.
+_llm-embedding._tcp  IN  SRV  10  20  443   voyage-proxy.corp.example.com.
+
+_llm-embedding._tcp  IN  TXT  "path=/v1/embeddings"
+_llm-embedding._tcp  IN  TXT  "providers=local,openai,voyage"
+
+; =============================================================================
+; VISION (MULTIMODAL) ENDPOINTS
+; Engineering: Full access to all vision models
+; =============================================================================
+
+_llm-vision._tcp  IN  SRV  10  50  443  provider1-proxy.corp.example.com.
+_llm-vision._tcp  IN  SRV  10  30  443  openai-proxy.corp.example.com.
+_llm-vision._tcp  IN  SRV  10  20  443  gemini-proxy.corp.example.com.
+
+_llm-vision._tcp  IN  TXT  "path=/v1/messages"
+_llm-vision._tcp  IN  TXT  "providers=provider1,openai,google"
+_llm-vision._tcp  IN  TXT  "models=claude-3.5-sonnet,gpt-4-vision,gemini-pro-vision"
+
+; =============================================================================
+; CODE-SPECIALIZED ENDPOINTS
+; Engineering: Multiple code models for comparison
+; =============================================================================
+
+_llm-code._tcp  IN  SRV  10  40  8082  codellama.internal.corp.example.com.
+_llm-code._tcp  IN  SRV  10  30  443   provider1-proxy.corp.example.com.
+_llm-code._tcp  IN  SRV  10  30  443   openai-proxy.corp.example.com.
+
+_llm-code._tcp  IN  TXT  "providers=codellama,provider1,openai"
+_llm-code._tcp  IN  TXT  "models=codellama-34b,claude-opus-5,gpt-4"
+
+; =============================================================================
+; IMAGE GENERATION
+; Engineering: Full access for prototyping
+; =============================================================================
+
+_llm-image-gen._tcp  IN  SRV  10  50  443   dalle-proxy.corp.example.com.
+_llm-image-gen._tcp  IN  SRV  10  30  8085  stable-diffusion.internal.corp.example.com.
+_llm-image-gen._tcp  IN  SRV  10  20  443   midjourney-proxy.corp.example.com.
+
+_llm-image-gen._tcp  IN  TXT  "providers=openai,local,midjourney"
+
+; =============================================================================
+; AUDIO/SPEECH ENDPOINTS
+; Engineering: Whisper for transcription, TTS for testing
+; =============================================================================
+
+_llm-audio._tcp  IN  SRV  10  60  8086  whisper.internal.corp.example.com.
+_llm-audio._tcp  IN  SRV  10  40  443   openai-proxy.corp.example.com.
+
+_llm-audio._tcp  IN  TXT  "capabilities=transcription,tts"
+_llm-audio._tcp  IN  TXT  "models=whisper-large-v3,tts-1"
+
+; =============================================================================
+; RERANKING ENDPOINTS
+; Engineering: For RAG experimentation
+; =============================================================================
+
+_llm-rerank._tcp  IN  SRV  10  100  443  cohere-proxy.corp.example.com.
+
+_llm-rerank._tcp  IN  TXT  "provider=cohere"
+_llm-rerank._tcp  IN  TXT  "model=rerank-english-v3.0"
+
+; =============================================================================
+; POLICY-BASED SUBDOMAINS
+; =============================================================================
+
+; Fast/cheap models
+_llm-chat._tcp.fast  IN  SRV  10  100  8080  llama-fast.internal.corp.example.com.
+_llm-chat._tcp.fast  IN  TXT  "model=llama-3-8b"
+_llm-chat._tcp.fast  IN  TXT  "cost=low"
+
+; High-capability models
+_llm-chat._tcp.smart  IN  SRV  10  50  443   provider1-proxy.corp.example.com.
+_llm-chat._tcp.smart  IN  SRV  10  50  443   openai-proxy.corp.example.com.
+_llm-chat._tcp.smart  IN  TXT  "models=claude-opus-5,gpt-4-turbo"
+
+; Experimental/bleeding-edge
+_llm-chat._tcp.experimental  IN  SRV  10  100  8090  llm-experimental.internal.corp.example.com.
+_llm-chat._tcp.experimental  IN  TXT  "status=beta"
+_llm-chat._tcp.experimental  IN  TXT  "stability=unstable"
+_llm-chat._tcp.experimental  IN  TXT  "use-case=testing-only"
+
+; PII-safe (engineering can use for compliant testing)
+_llm-chat._tcp.pii  IN  SRV  10  100  8443  llm-secure.internal.corp.example.com.
+_llm-chat._tcp.pii  IN  TXT  "scheme=https"
+_llm-chat._tcp.pii  IN  TXT  "compliance=soc2,hipaa"
+
+; =============================================================================
+; DEVELOPMENT/TESTING SPECIFIC
+; =============================================================================
+
+; Mock endpoint for integration testing
+_llm-chat._tcp.mock  IN  SRV  10  100  3000  llm-mock.internal.corp.example.com.
+_llm-chat._tcp.mock  IN  TXT  "provider=mock"
+_llm-chat._tcp.mock  IN  TXT  "use-case=ci-testing"
+_llm-chat._tcp.mock  IN  TXT  "cost=free"
+
+; =============================================================================
+; ACTUAL ENDPOINT A RECORDS
+; =============================================================================
+
+llm-gpu-cluster.internal     IN  A  10.2.10.100
+llm-cpu-fallback.internal    IN  A  10.2.10.101
+llm-experimental.internal    IN  A  10.2.10.150
+embeddings.internal          IN  A  10.2.10.102
+codellama.internal           IN  A  10.2.10.103
+llm-secure.internal          IN  A  10.2.10.200
+llama-fast.internal          IN  A  10.2.10.104
+stable-diffusion.internal    IN  A  10.2.10.105
+whisper.internal             IN  A  10.2.10.106
+llm-mock.internal            IN  A  10.2.10.250
+
+; Cloud proxies
+provider1-proxy              IN  A  10.2.20.10
+openai-proxy                 IN  A  10.2.20.11
+dalle-proxy                  IN  A  10.2.20.12
+gemini-proxy                 IN  A  10.2.20.13
+voyage-proxy                 IN  A  10.2.20.14
+cohere-proxy                 IN  A  10.2.20.15
+midjourney-proxy             IN  A  10.2.20.16

@@ -1,0 +1,129 @@
+; BIND Zone File - Internal View
+; corp.example.com - LLM Discovery for Internal Network
+;
+; Internal clients get on-premises endpoints with cloud as backup
+
+$TTL 300
+@       IN      SOA     ns1.corp.example.com. admin.corp.example.com. (
+                        2026101201      ; Serial (YYYYMMDDNN)
+                        3600            ; Refresh
+                        1800            ; Retry
+                        604800          ; Expire
+                        300 )           ; Negative Cache TTL
+
+; Name servers
+@       IN      NS      ns1.corp.example.com.
+@       IN      NS      ns2.corp.example.com.
+
+ns1     IN      A       10.0.1.10
+ns2     IN      A       10.0.1.11
+
+; =============================================================================
+; CHAT COMPLETION ENDPOINTS
+; Internal network: Try local GPU cluster first, cloud as backup
+; =============================================================================
+
+; Primary: Local GPU cluster (low latency, no egress cost)
+_llm-chat._tcp  IN  SRV  10  70  8080  llm-gpu-cluster.internal.corp.example.com.
+
+; Secondary: On-prem CPU fallback
+_llm-chat._tcp  IN  SRV  10  30  8080  llm-cpu-fallback.internal.corp.example.com.
+
+; Tertiary: Cloud providers (higher latency, egress costs)
+_llm-chat._tcp  IN  SRV  20  50  443   provider1-proxy.corp.example.com.
+_llm-chat._tcp  IN  SRV  20  50  443   openai-proxy.corp.example.com.
+
+; Metadata for chat endpoints
+_llm-chat._tcp  IN  TXT  "path=/v1/messages"
+_llm-chat._tcp  IN  TXT  "provider=mixed"
+_llm-chat._tcp  IN  TXT  "protocol=openai-compatible"
+_llm-chat._tcp  IN  TXT  "auth=required"
+_llm-chat._tcp  IN  TXT  "environment=internal"
+
+; =============================================================================
+; EMBEDDING ENDPOINTS
+; =============================================================================
+
+; Local embedding service
+_llm-embedding._tcp  IN  SRV  10  100  8081  embeddings.internal.corp.example.com.
+
+; Cloud backup
+_llm-embedding._tcp  IN  SRV  20  100  443   openai-proxy.corp.example.com.
+
+_llm-embedding._tcp  IN  TXT  "path=/v1/embeddings"
+_llm-embedding._tcp  IN  TXT  "provider=local-e5"
+_llm-embedding._tcp  IN  TXT  "model=e5-large-v2"
+_llm-embedding._tcp  IN  TXT  "dimensions=1024"
+
+; =============================================================================
+; VISION (MULTIMODAL) ENDPOINTS
+; No local vision models - use cloud only
+; =============================================================================
+
+_llm-vision._tcp  IN  SRV  10  60  443  provider1-proxy.corp.example.com.
+_llm-vision._tcp  IN  SRV  10  40  443  openai-proxy.corp.example.com.
+
+_llm-vision._tcp  IN  TXT  "path=/v1/messages"
+_llm-vision._tcp  IN  TXT  "provider=cloud"
+_llm-vision._tcp  IN  TXT  "model=claude-3.5-sonnet"
+
+; =============================================================================
+; CODE-SPECIALIZED ENDPOINTS
+; =============================================================================
+
+; Code-specialized local model
+_llm-code._tcp  IN  SRV  10  100  8082  codellama.internal.corp.example.com.
+
+; Cloud backup with coding capability
+_llm-code._tcp  IN  SRV  20  100  443   provider1-proxy.corp.example.com.
+
+_llm-code._tcp  IN  TXT  "path=/v1/completions"
+_llm-code._tcp  IN  TXT  "provider=codellama"
+_llm-code._tcp  IN  TXT  "model=codellama-34b"
+
+; =============================================================================
+; IMAGE GENERATION - Cloud only
+; =============================================================================
+
+_llm-image-gen._tcp  IN  SRV  10  100  443  dalle-proxy.corp.example.com.
+
+_llm-image-gen._tcp  IN  TXT  "path=/v1/images/generations"
+_llm-image-gen._tcp  IN  TXT  "provider=openai"
+_llm-image-gen._tcp  IN  TXT  "model=dall-e-3"
+
+; =============================================================================
+; POLICY-BASED SUBDOMAINS
+; =============================================================================
+
+; Fast/cheap models for non-critical workloads
+_llm-chat._tcp.fast  IN  SRV  10  100  8080  llama-fast.internal.corp.example.com.
+_llm-chat._tcp.fast  IN  TXT  "model=llama-3-8b"
+_llm-chat._tcp.fast  IN  TXT  "tier=economy"
+
+; High-capability for complex reasoning
+_llm-chat._tcp.smart  IN  SRV  10  100  443  provider1-proxy.corp.example.com.
+_llm-chat._tcp.smart  IN  TXT  "model=claude-opus-5"
+_llm-chat._tcp.smart  IN  TXT  "tier=premium"
+
+; PII-safe endpoints (on-prem only, no cloud)
+_llm-chat._tcp.pii  IN  SRV  10  100  8443  llm-secure.internal.corp.example.com.
+_llm-chat._tcp.pii  IN  TXT  "scheme=https"
+_llm-chat._tcp.pii  IN  TXT  "compliance=soc2,hipaa,gdpr"
+_llm-chat._tcp.pii  IN  TXT  "data-residency=on-premises"
+_llm-chat._tcp.pii  IN  TXT  "audit-logging=enabled"
+
+; =============================================================================
+; ACTUAL ENDPOINT A RECORDS
+; =============================================================================
+
+llm-gpu-cluster.internal     IN  A  10.0.10.100
+llm-cpu-fallback.internal    IN  A  10.0.10.101
+embeddings.internal          IN  A  10.0.10.102
+codellama.internal           IN  A  10.0.10.103
+llm-secure.internal          IN  A  10.0.10.200
+llama-fast.internal          IN  A  10.0.10.104
+
+; Cloud proxies (internal addresses via NAT/proxy)
+provider1-proxy              IN  A  10.0.20.10
+openai-proxy                 IN  A  10.0.20.11
+dalle-proxy                  IN  A  10.0.20.12

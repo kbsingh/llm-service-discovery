@@ -1,0 +1,25 @@
+[package]
+name = "llm-discovery"
+version = "0.1.0"
+edition = "2021"
+authors = ["DNS LLM Discovery Contributors"]
+description = "DNS SRV-based LLM endpoint discovery client"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+trust-dns-resolver = "0.23"
+rand = "0.8"
+thiserror = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[[bin]]
+name = "llm-discovery-example"
+path = "src/bin/example.rs"
+
+[lib]
+name = "llm_discovery"
+path = "src/lib.rs"
